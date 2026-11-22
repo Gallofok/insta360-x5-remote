@@ -1,5 +1,7 @@
 # insta360-x5-remote
 
+**English** · [中文](README.zh-CN.md)
+
 Reverse-engineering notes and tooling for operating an **Insta360 X5** as a
 remotely-controllable network node — wake it, keep it awake, put it on a
 network, and pull its live preview — from a small always-on gateway (e.g. a
@@ -151,6 +153,12 @@ able to join the camera's 5 GHz AP.
   offsets blindly.
 - No firmware images, extracted binaries, or patched blobs are distributed here
   — only methods and findings.
+
+## Documentation
+
+- [Capability matrix](docs/capabilities.md) — verified / partial / unsolved, item by item
+- [The port-6666 access gate (deep dive)](docs/gate-re.md) — decompiled logic + patch map
+- [Reproduction guide](docs/reproduce.md) — from firmware unpack to protocol capture to Ghidra
 
 ## Credits
 
