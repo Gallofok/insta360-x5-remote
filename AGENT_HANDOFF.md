@@ -43,14 +43,20 @@ missing piece is a **5 GHz Wi-Fi client on the gateway**.
 5. Keep-awake is then doubly covered (the held 6666 session itself keeps the
    camera up, same as the app).
 
-## The firmware-patch path (optional, harder)
+## The firmware-patch path (in-memory, via ptrace — this is the good one)
 
-The gate (`InsMDev_Wifi_Connect_Monitor`) can be NOP-patched to serve any client
-(`docs/gate-re.md` has the patch map). The patched `instaAIP` can be run via the
-boot hook (reversible). **Blocker:** deploying/debugging a modified main daemon
-needs a **hardware UART** — the software USB-serial gadget is re-claimed by
-`instaAIP`, exFAT logs don't flush, and a broken daemon kills Wi-Fi/BT (no remote
-recovery). Get a serial console on the mainboard before attempting this.
+The gate (`InsMDev_Wifi_Connect_Monitor`) can be NOP-patched to serve any client.
+**Do it in memory with `ptrace`, not by replacing the binary** — see
+[docs/live-patch.md](docs/live-patch.md). The live process keeps running (BLE /
+USB / Wi-Fi untouched), nothing hits flash, revert = restart. (This replaces the
+earlier "needs a UART" conclusion.)
+
+Current status: against the **camera-resident** binary (not the downloaded
+firmware — they differ!), NOPing the three gate branches moved a LAN client from
+`i/o timeout` → `EOF` — i.e. into the serve path. **Remaining:** one more
+peer-dependent (`getpeername`-based) check closes non-station clients; finding a
+clean bypass (or confirming the delivery path is intrinsically station-bound) is
+the next RE task. Tools: `tools/poker.c` (NOP), `tools/pokew.c` (write/restore).
 
 ## Gotchas learned the hard way
 
@@ -71,6 +77,13 @@ recovery). Get a serial console on the mainboard before attempting this.
   though the process ran. Prefer a serial console for live output.
 - **The gate is association-based, not IP-based** — adding a `192.168.42.x`
   alias and source-binding does **not** pass it.
+- **Downloaded firmware ≠ installed firmware** — the vendor `.bin` can be a newer
+  build than what's on the camera, with different offsets. RE/patch the binary
+  pulled from `/usr/bin/instaAIP`, not the one from the firmware image.
+- **Patch the live process, not a replacement binary** — `ptrace` NOP in memory;
+  the daemon keeps running, revert = restart. A UART is not required for this.
+- **Gateway/Pi Bluetooth wedges** easily under churn — if the camera seems
+  unreachable, suspect the *host* BT first (restart it / reboot the Pi).
 
 ## Local artifacts (NOT in this repo — keep them off GitHub)
 

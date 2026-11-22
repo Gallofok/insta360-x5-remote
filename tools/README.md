@@ -10,6 +10,8 @@ data baked in.
 | `frames.py` | Decode the length-prefixed `syNceNdinS` frames from a 6666 stream dump. `python3 frames.py <stream.bin> [N]` |
 | `extract_video.py` | Reassemble the contiguous TCP stream and write the H.264 substream. `python3 extract_video.py capture.pcap out.h264` |
 | `srcprobe.go` | Source-bound 6666 handshake probe (used to prove the gate is association-based, not IP-based). `go build srcprobe.go && ./srcprobe <srcIP> <dstIP>:6666` |
+| `poker.c` | Live in-memory NOP-patcher: attach to a PIE process via `ptrace`, resolve `.text` file offsets to runtime addresses via `/proc/<pid>/maps`, overwrite 4 bytes with AArch64 NOP. `aarch64-linux-gnu-gcc -static -o poker poker.c` then `./poker <pid> <exe> <hexoff>...` |
+| `pokew.c` | Companion: write/restore an arbitrary 32-bit word at a file offset (undo a NOP). `./pokew <pid> <exe> <hexoff> <hexword32>` |
 | `ghidra/Decomp.java` | Headless Ghidra post-script: decompile the functions that call `accept`/`getpeername` (the 6666 server loop). |
 
 Decode a captured stream end to end:

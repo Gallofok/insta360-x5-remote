@@ -134,6 +134,7 @@ USB 网卡的树莓派）。因为 6666 门禁要求*真实*关联的客户端�
 - [**Agent 交接文档**](AGENT_HANDOFF.md) —— 项目现状 + 下一步该做什么，供后续接手
 - [功能对照表](docs/capabilities.md) —— 已验证 / 部分 / 未解决，逐条
 - [6666 访问门禁（深入）](docs/gate-re.md) —— 反编译逻辑 + 补丁定位
+- [活进程内存 patch（ptrace）](docs/live-patch.md) —— 改运行中的守护进程，不刷 flash，重启即还原
 - [复现指南](docs/reproduce.md) —— 从解包固件到抓协议到 Ghidra
 - [`tools/`](tools/) —— 分析工具（AArch64 交叉引用、pcap/流解码、Ghidra 脚本、门禁探针）
 - [`gateway/`](gateway/) —— 运行时：SD 卡 root 钩子、保活守护进程 + systemd 单元

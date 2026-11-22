@@ -55,8 +55,9 @@ Legend: ✅ verified on real hardware · ⚠️ partial / needs specific hardwar
 |---|---|---|
 | Force the AP to 2.4 GHz (so a 2.4-only gateway can associate) | ❌ | `instaAIP` regenerates `hostapd.conf` and keeps the AP on the STA's band; manual edits are reverted |
 | Software-fake an associated client (IP alias `192.168.42.x`, source-bind) | ❌ | Gate checks a real association, not the peer IP |
-| Binary-patch the gate (NOP the branches) + run via boot hook | ⚠️ | Patch is mechanically valid (verified NOPs); deployment is impractical **without a UART** — `instaAIP` re-grabs USB/Wi-Fi/BT, logs don't flush, blind crashes are unrecoverable remotely |
-| USB-serial (g_serial) console for debugging | ⚠️ | `/dev/ttyGS0` comes up on the camera, but `instaAIP` re-claims the USB gadget for mass-storage, so it won't stay enumerated on the host |
+| **Live in-memory gate patch via `ptrace`** | ⚠️ | **The right method** — NOP the branches in the running `instaAIP`; process stays up, no flash, revert = restart. Verified working; moved a LAN client from `timeout` → `EOF` (into the serve path). Not yet a full stream — a further peer-dependent check remains. See [live-patch.md](live-patch.md) |
+| Replace `instaAIP` via SD boot hook | ❌ | Fights the supervised daemon (re-grabs USB/Wi-Fi/BT); exFAT logs don't flush; a bad binary = no remote recovery. Also failed because the **downloaded firmware ≠ the installed version** (wrong offsets) |
+| USB-serial (g_serial) console for debugging | ❌ | `/dev/ttyGS0` comes up, but `instaAIP` re-claims the USB gadget for mass-storage; superseded by in-memory patching anyway |
 
 ## The one missing link
 

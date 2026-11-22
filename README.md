@@ -159,6 +159,7 @@ able to join the camera's 5 GHz AP.
 - [**Agent handoff**](AGENT_HANDOFF.md) — project state + the exact next step, for whoever continues
 - [Capability matrix](docs/capabilities.md) — verified / partial / unsolved, item by item
 - [The port-6666 access gate (deep dive)](docs/gate-re.md) — decompiled logic + patch map
+- [Live in-memory patching (ptrace)](docs/live-patch.md) — patch the running daemon, no flash, revert = restart
 - [Reproduction guide](docs/reproduce.md) — from firmware unpack to protocol capture to Ghidra
 - [`tools/`](tools/) — analysis helpers (AArch64 xref, pcap/stream decoders, Ghidra script, gate probe)
 - [`gateway/`](gateway/) — runtime: SD-card root hook, keep-awake daemon + systemd unit

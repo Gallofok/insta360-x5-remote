@@ -88,20 +88,24 @@ Each gate is a single conditional branch; turning it into a `NOP`
 `.text` here is loaded 1:1 (virtual address == file offset), so patching is a
 byte edit; `objdump` confirms the NOPs.
 
-**Deploying it is the hard part, not the edit.** The SD boot hook can run a
-modified `instaAIP` (reversibly), but on this box:
+**Don't deploy a replacement binary — patch the running process in memory.**
+Replacing `instaAIP` (SD boot hook, or kill-and-rerun) fights the whole system
+(it re-claims USB, rewrites `hostapd.conf`, owns BT; exFAT logs don't flush; a
+broken daemon = no remote recovery). The clean way is `ptrace`: NOP these
+branches **in the live process** — it keeps running, nothing touches flash, and
+revert = restart. See [**live-patch.md**](live-patch.md). (An earlier version of
+these notes concluded you need a UART; in-memory patching makes that unnecessary
+for user-space daemon work.)
 
-- `instaAIP` is supervised and actively re-claims the USB gadget, rewrites
-  `hostapd.conf`, and owns the Bluetooth stack — so hot-swaps and config
-  overrides get undone;
-- exFAT log writes from the camera don't flush, so a crash leaves an empty log;
-- a broken main daemon means no Wi-Fi/telnet, i.e. no remote recovery.
+**Two caveats that cost us a lot of time:**
 
-The honest prerequisite for iterating on a gate patch is a **hardware serial
-console (UART)** so you can see boot/daemon output live and recover
-out-of-band. The software USB-serial gadget (`g_serial` → `/dev/ttyGS0`) exists
-in the firmware but `instaAIP` re-claims the USB function, so it won't stay
-enumerated on the host.
+1. **Patch the binary the camera is actually running**, not the one from the
+   vendor download — the download can be a *newer build* with different offsets.
+   Pull `/usr/bin/instaAIP` off the device and re-locate the gate in it.
+2. The three branches above are necessary but **not sufficient**: NOPing them
+   moves a LAN client from `timeout` to `EOF` (engaged, then closed) — there's a
+   further `getpeername`-based, peer-dependent check in the serve path. See
+   [live-patch.md](live-patch.md) for the current status and the open question.
 
 ## Takeaway
 
