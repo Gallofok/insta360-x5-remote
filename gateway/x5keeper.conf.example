@@ -1,0 +1,5 @@
+# Copy to /etc/x5keeper.conf and edit. No quotes needed around simple values.
+BLE_MAC=aa:bb:cc:dd:ee:ff          # camera BLE address  (insta360ctl scan)
+SSID=YourWiFiName
+PSK=your-plaintext-wifi-password   # PLAINTEXT PSK (a 64-hex key is rejected by the camera)
+CAM_IP=192.168.1.123               # the camera's DHCP address on your LAN
