@@ -1,0 +1,18 @@
+# Never commit firmware, extracted binaries, or patched blobs (copyright + may embed device data)
+*.bin
+*.ubi
+*.apk
+*.img
+*.insv
+*.h264
+*.pcap
+rootfs/
+extracted*/
+instaAIP*
+*.real
+*.patched
+# keys / local config
+*.key
+*_deploy
+settings*.json
+.env
