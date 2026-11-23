@@ -218,6 +218,50 @@ Fastest way to get the exact command bytes for your firmware: capture the
 official app's 6666 session once (it's a correct client) and replay its
 client→camera stream.
 
+### 3. Keep it running, stop it cleanly
+
+- **Sustain:** a single `START_LIVE` yields only a few seconds of video — the
+  camera stops sending unless the client keeps talking. The app streams
+  indefinitely because it keeps sending its `type 04` status/poll commands the
+  whole time. Replaying those commands **in a loop with the `seq` byte
+  incrementing** (not a fixed captured `seq`) sustains the stream; a fixed `seq`
+  stalls within ~30 s (the camera treats the repeats as stale).
+- **Stop:** `op = 0x02` (empty body) is `STOP_LIVE_STREAM` — it triggers
+  `InsApp_NetFifo_Stop_LiveStream` on the camera (confirmed by trace). Always send
+  it **on the streaming connection, then close gracefully** (`shutdown(WR)`);
+  dropping the TCP with a `RST` leaves the camera's preview pipeline running.
+- **Reconnect fast:** only the frames up to and including `START_LIVE` are needed
+  to bring video back (~the first ~60 frames), so a reconnect warms up in ~3 s
+  rather than replaying the whole capture.
+
+### 4. Delivering to a browser / phone (latency)
+
+The raw 6666 stream is low-latency H.264 — the same bytes the app decodes
+frame-by-frame (~sub-second). Re-packaging as **HLS** adds 2–5 s (segment +
+player buffering); feeding the H.264 to a **WebRTC** server (e.g. go2rtc/MediaMTX)
+keeps it near the app's latency and plays in any browser. `-c:v copy` into the
+muxer needs timestamps — `ffmpeg -use_wallclock_as_timestamps 1` works and avoids
+re-encoding on a weak gateway.
+
+### The "camera shows occupied / preview" caveat (cosmetic)
+
+Forcing `ap_monitor_running = 1` is a *flag*, not a real 802.11 association. The
+camera's on-screen "app is previewing" / busy state is normally cleared by the
+**hostapd station-disassociation event** when a real phone leaves the hotspot —
+an event that never fires here (there is no real station). So after you stop and
+disconnect, the camera's own screen can stay in the preview/occupied state until
+it sleeps or is touched/power-cycled, even though every session (6666, BLE, the
+flag) is actually released. It's cosmetic — the device is free — but there's no
+clean network-side way to force the display back without a genuine association.
+
+### Releasing the BLE keep-awake cleanly
+
+If a gateway holds a BLE keep-awake session, note that **killing the BLE client
+process does not drop the link** — the host's `bluetoothd` keeps the ACL
+connection open, so the camera still sees a central connected. Issue an explicit
+`bluetoothctl disconnect <addr>` (or equivalent) on teardown, or the camera never
+transitions to "nobody connected."
+
 ### Gotchas that cost time here
 
 - `wifi_recv` sleeps in multi-second steps when idle; its ~3 s sleep is longer

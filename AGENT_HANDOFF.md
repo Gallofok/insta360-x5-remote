@@ -15,8 +15,17 @@ relays it to a VPS for remote viewing — no phone app in the loop.
 **Solved end to end:** a non-associated LAN client pulls the live 6666 H.264 from
 the camera (no 5 GHz radio, no hotspot association) via an in-memory `ptrace` patch
 of `instaAIP` + replaying the app's handshake/commands **paced**. Verified —
-decoded to a real frame. Full recipe in [docs/live-patch.md](docs/live-patch.md).
-The camera joins **your** Wi-Fi (STA, over BLE) and is reached over the LAN.
+decoded to a real frame. The camera joins **your** Wi-Fi (STA, over BLE) and is
+reached over the LAN; the stream **sustains** by looping the app's `type 04`
+commands with an incrementing `seq`, **stops** cleanly with `op 0x02`
+(`STOP_LIVE_STREAM`) + graceful close, and delivers to a browser at near-app
+latency via **WebRTC** (go2rtc/MediaMTX). Full recipe + the start/stop/sustain
+protocol in [docs/live-patch.md](docs/live-patch.md).
+
+Known cosmetic caveat: because we *fake* the association with a memory flag, the
+camera's own "previewing/occupied" screen isn't cleared by the normal station-
+disassociation event and can linger after teardown (the device is actually
+released). See the caveat section in `docs/live-patch.md`.
 
 ## What's done (see `docs/capabilities.md` for the full matrix)
 
