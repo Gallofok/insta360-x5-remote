@@ -109,6 +109,9 @@ for user-space daemon work.)
 
 ## Takeaway
 
-The gate is understood and mechanically patchable, but the **supported** way to
-get a stream is to satisfy it: present a **real associated hotspot client**. The
-camera's AP is 5 GHz, so that client needs a 5 GHz radio.
+The gate is understood **and defeated**: patched in memory (`ptrace`) it serves a
+non-associated LAN client the live H.264 — no hotspot association, no 5 GHz radio
+(the camera joins your Wi-Fi instead). See [live-patch.md](live-patch.md) for the
+full working recipe. The *stock* way to satisfy the gate — present a **real
+associated hotspot client** (and the camera's AP is 5 GHz, so that client needs a
+5 GHz radio) — still works but is no longer the only route.
