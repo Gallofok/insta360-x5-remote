@@ -262,6 +262,55 @@ connection open, so the camera still sees a central connected. Issue an explicit
 `bluetoothctl disconnect <addr>` (or equivalent) on teardown, or the camera never
 transitions to "nobody connected."
 
+## Tapping the pipeline upstream of the gate — and why it isn't a free lunch
+
+A tempting idea: instead of fighting the 6666 gate, read the already-encoded
+H.264 *before* it reaches the gated network layer. Scouting the running camera
+pins down how feasible that really is on this model.
+
+**The frame path (from the binary + the live device tree):**
+
+```
+dual fisheye → ISP → H.264 encoder (on the Ambarella CV5 RTOS co-core)
+  → rpmsg + shared memory  (NOT a Linux /dev/iav — see below)
+  → instaAIP:  InsMw_FrameShare_Stream_Init → InsMw_FrameShare_GetDataInfo
+               (per-frame H.264 ptr/len in an mmap'd shared buffer)
+  → packaged into syNceNdinS frames → served on 6666   ← the gate is only here
+```
+
+- **No `/dev/iav`.** The encode runs entirely on the RTOS co-core; Linux receives
+  frames over a **custom Insta360 rpmsg channel** (`/dev/rpmsg_insta360_scull`)
+  plus a **FrameShare** shared-memory region, with `instaAIP` as the **single
+  consumer**. So the generic "open the Ambarella bitstream device and dequeue"
+  plan does **not** apply — there is no standard device/ioctl API, only a private
+  IPC to reverse, and a second reader would contend with `instaAIP`.
+- **Realistic tap point:** hook `InsMw_FrameShare_GetDataInfo` inside `instaAIP`
+  (where the H.264 pointer/length is in hand, before packaging) and copy the frame
+  out. This is "patching v2" — inject a shim (ptrace, or an SD-boot-hook
+  replacement binary) rather than flip a branch.
+
+**The real lock is the encoder *start*, not where you read frames.** The preview
+encoder only runs once something calls `InsApp_NetFifo_Start_LiveStream`, and the
+only trigger found is the 6666 `op 0x01` — which a client can only send *after*
+passing the gate (i.e. after `ap_monitor_running = 1`). So a frame-tap relocates
+the *read* but still needs the *start* to go through the gated/faked-association
+path — meaning **the tap does not, by itself, escape the cosmetic "occupied"
+screen** (that comes from faking the association, see the caveat above).
+
+**The clean OSC route is closed.** `camera.getLivePreview` exists in the OSC
+command table but the firmware returns `disabledCommand` ("command is currently
+not supported") — so the standard OSC MJPEG preview is not available as a
+non-gated path. (Supported OSC commands here: `getOptions`/`setOptions`,
+`startCapture`/`stopCapture`, `takePicture`, `listFiles`/`listImages`,
+`getMetadata`, `delete`, `checkForUpdates`, `reset`.)
+
+**Verdict:** the upstream tap is a *deeper* path but not a *cleaner* one on this
+model — it's days of custom-IPC reverse-engineering and still doesn't remove the
+association fakery (hence the occupied-screen artifact), because the preview
+encoder's only start path runs through the gate. The 6666 approach documented
+above stays the practical route; the only genuinely clean fix for the occupied
+screen is a **real** associated station.
+
 ### Gotchas that cost time here
 
 - `wifi_recv` sleeps in multi-second steps when idle; its ~3 s sleep is longer
