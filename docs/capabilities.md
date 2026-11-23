@@ -46,8 +46,9 @@ Legend: ✅ verified on real hardware · ⚠️ partial / needs specific hardwar
 | Capture & decode a real stream | ✅ | Pulled via the official app over the hotspot, reassembled, decoded, stitched (ffmpeg `v360`) |
 | Reverse the access gate | ✅ | `InsMDev_Wifi_Connect_Monitor`: `ap_monitor_running` guards + client-MAC check — see [gate-re.md](gate-re.md) |
 | Pull 6666 from a **real associated** hotspot client | ⚠️ | Proven with the official app (which *is* such a client); a non-app raw client should pass the same gate but was not independently confirmed (adb/association friction) |
-| Pull 6666 from LAN / loopback / spoofed source | ❌ | TCP connects, handshake never answered — the gate requires a genuine 802.11 association, not a peer IP |
-| Fully standalone on-device serving | ❌ | Camera can't be its own hotspot client; loopback is additionally gated |
+| Pull 6666 live H.264 from a **non-associated LAN client** | ✅ | Via the in-memory gate patch set **+ `ap_monitor_running=1`**, with the app's sync + commands + `START_LIVE` replayed **paced**. Verified: full control session + 3.8 MB live H.264 (High profile), decoded to a real frame. See [live-patch.md](live-patch.md) |
+| Pull 6666 from LAN with no patch (stock) | ❌ | TCP connects, handshake never answered — stock gate requires a genuine 802.11 association, not a peer IP |
+| Fully standalone on-device serving (camera as its own client) | ❌ | Camera can't be its own hotspot client; loopback is additionally gated (the LAN-client patch path above is the working route) |
 
 ## Attempted workarounds
 
@@ -55,7 +56,7 @@ Legend: ✅ verified on real hardware · ⚠️ partial / needs specific hardwar
 |---|---|---|
 | Force the AP to 2.4 GHz (so a 2.4-only gateway can associate) | ❌ | `instaAIP` regenerates `hostapd.conf` and keeps the AP on the STA's band; manual edits are reverted |
 | Software-fake an associated client (IP alias `192.168.42.x`, source-bind) | ❌ | Gate checks a real association, not the peer IP |
-| **Live in-memory gate patch via `ptrace`** | ⚠️ | **The right method** — patch the running `instaAIP`; process stays up, no flash, revert = restart. Gate fully reversed: it's **two threads**, `conn_monitor` (accept) + `wifi_recv` (recv), each with its own `ap_monitor_running` check. Accept side bypassed & verified (LAN client accepted + promoted, bytes queued in `rx_queue`); the real blocker is `wifi_recv`, which `usleep`s unless a station is associated. Correct fix = set `ap_monitor_running=1` (NOT a NOP — the idle fall-through aborts and crashes the app stack). See [live-patch.md](live-patch.md) |
+| **Live in-memory gate patch via `ptrace`** | ✅ | **Solved end to end.** Patch the running `instaAIP` (no flash, revert = restart): NOP the `ap_monitor_running` accept guards + MAC `strncmp`, repoint the `SIOCGARP` interface, reroute+de-sleep `wifi_recv`, and **set `ap_monitor_running=1`** (the key that lights up the SEND path). Then replay the app's sync + commands + `START_LIVE` **paced**. Result: full control session + live H.264 to a non-associated LAN client, decoded to a real frame. See [live-patch.md](live-patch.md) |
 | Replace `instaAIP` via SD boot hook | ❌ | Fights the supervised daemon (re-grabs USB/Wi-Fi/BT); exFAT logs don't flush; a bad binary = no remote recovery. Also failed because the **downloaded firmware ≠ the installed version** (wrong offsets) |
 | USB-serial (g_serial) console for debugging | ❌ | `/dev/ttyGS0` comes up, but `instaAIP` re-claims the USB gadget for mass-storage; superseded by in-memory patching anyway |
 

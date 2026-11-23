@@ -27,11 +27,14 @@ Raspberry Pi) instead of the phone app.
 | Local control API (OSC) | ✅ | HTTP OSC on `:80` (`/osc/info`, `/osc/state`, `camera.getOptions`, `camera.startCapture`, …) |
 | Decode the live-preview protocol (port 6666) | ✅ | `syNceNdinS` framing, H.264 High dual-fisheye, `START_LIVE_STREAM` |
 | Forward a stream to a VPS and watch remotely | ✅ | VPN overlay + MediaMTX/go2rtc (standard, off-the-shelf) |
-| **On-device / LAN live preview without a hotspot client** | ❌ | Blocked by an access gate (see below) |
+| **LAN live preview without a hotspot client** | ✅ | Live H.264 pulled by a non-associated LAN client via an in-memory gate patch — see below |
 
-The **one missing link** for fully-remote live view is a **real Wi-Fi client
-associated to the camera's own hotspot** (the camera's AP is 5 GHz, so a
-2.4 GHz-only gateway cannot associate to it as-is).
+Live preview on port 6666 is normally gated to a **real Wi-Fi client associated
+to the camera's own hotspot**. That gate can be **patched in memory** so a plain
+LAN client (never associated) pulls the live H.264 stream — reverse-engineered
+end to end and verified (decoded to a real frame). See
+[docs/live-patch.md](docs/live-patch.md). The supported, no-patch alternative is
+still a real 5 GHz hotspot client.
 
 ---
 

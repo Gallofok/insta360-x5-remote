@@ -16,3 +16,9 @@ instaAIP*
 *_deploy
 settings*.json
 .env
+
+# local capture artifacts (never commit — may contain device-specific data)
+capture/
+*.pcap
+*.h264
+*.bin
