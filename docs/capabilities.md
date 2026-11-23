@@ -55,7 +55,7 @@ Legend: ✅ verified on real hardware · ⚠️ partial / needs specific hardwar
 |---|---|---|
 | Force the AP to 2.4 GHz (so a 2.4-only gateway can associate) | ❌ | `instaAIP` regenerates `hostapd.conf` and keeps the AP on the STA's band; manual edits are reverted |
 | Software-fake an associated client (IP alias `192.168.42.x`, source-bind) | ❌ | Gate checks a real association, not the peer IP |
-| **Live in-memory gate patch via `ptrace`** | ⚠️ | **The right method** — NOP the branches in the running `instaAIP`; process stays up, no flash, revert = restart. Verified working; moved a LAN client from `timeout` → `EOF` (into the serve path). Not yet a full stream — a further peer-dependent check remains. See [live-patch.md](live-patch.md) |
+| **Live in-memory gate patch via `ptrace`** | ⚠️ | **The right method** — patch the running `instaAIP`; process stays up, no flash, revert = restart. Gate fully reversed: it's **two threads**, `conn_monitor` (accept) + `wifi_recv` (recv), each with its own `ap_monitor_running` check. Accept side bypassed & verified (LAN client accepted + promoted, bytes queued in `rx_queue`); the real blocker is `wifi_recv`, which `usleep`s unless a station is associated. Correct fix = set `ap_monitor_running=1` (NOT a NOP — the idle fall-through aborts and crashes the app stack). See [live-patch.md](live-patch.md) |
 | Replace `instaAIP` via SD boot hook | ❌ | Fights the supervised daemon (re-grabs USB/Wi-Fi/BT); exFAT logs don't flush; a bad binary = no remote recovery. Also failed because the **downloaded firmware ≠ the installed version** (wrong offsets) |
 | USB-serial (g_serial) console for debugging | ❌ | `/dev/ttyGS0` comes up, but `instaAIP` re-claims the USB gadget for mass-storage; superseded by in-memory patching anyway |
 

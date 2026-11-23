@@ -64,33 +64,91 @@ binary (`start`, file `offset`), and compute `runtime = start + (F - offset)`.
 ./pokew $(pidof instaAIP) instaAIP <off> <orig_hexword>
 ```
 
-## What we observed (status)
+## What we observed (status) — the gate is TWO subsystems, not one
 
-Against the **correct** (camera-resident) binary, NOPing the three gate branches
-(`ap_monitor_running` outer + inner, and the client-MAC `strncmp`) changed the
-LAN client's result on port 6666 from:
+Port 6666 is served by **two cooperating threads**, each with its **own**
+`ap_monitor_running` check. Bypassing one does nothing until you also handle the
+other. This was the key realization after tracing the full path.
 
-- **`i/o timeout`** (connection accepted at TCP level, handshake silently
-  ignored — the gate fully blocks you), to
-- **`EOF`** (the server now *engages* with the connection and then closes it).
+| Thread (by its log name) | Role | Its `ap_monitor_running` gate |
+|---|---|---|
+| `conn_monitor` | `select`s the **listen** socket, `accept()`s, looks up the peer MAC, then **promotes** the fd into a shared slot and (if idle too long) reaps it. It never reads client data. | outer + inner guards, plus the client-MAC `strncmp` |
+| `wifi_recv`    | polls the promoted-fd slot and does the actual `recv()` / frame parsing / dispatch | a guard that **`usleep`s forever unless a station is associated** |
 
-So the three branches are the right targets and we are **inside the serve path**.
-There is at least one more peer-dependent check: right after `accept()` the code
-calls a `getpeername`-based routine and branches to a close if it "fails" — and
-for a LAN client (not an associated hotspot station) it does fail. Forcing that
-branch with a blind NOP leaves an uninitialised peer-MAC buffer and makes things
-worse (back to a hang), so it needs a cleaner fix: understand what the serve
-path reads about the peer and whether a non-station peer can satisfy it.
+### Step 1 — the accept side (bypassed)
 
-**Open question:** whether the stream *delivery* path is intrinsically tied to an
-associated station, or whether the remaining checks can be satisfied/bypassed for
-an arbitrary TCP client. That's the next piece of RE.
+NOPing `conn_monitor`'s three branches (`ap_monitor_running` outer + inner, and
+the client-MAC `strncmp`) plus one more fix (below) moved the LAN client from
+`i/o timeout` → `EOF` → **fully accepted**:
 
-## Next steps
+- The routine right after `accept()` is a `getpeername()` + `ioctl(SIOCGARP)`
+  that resolves the peer's MAC **on a fixed interface** (the AP interface, e.g.
+  `wlanN`). A LAN peer isn't in that interface's ARP table → `ENXIO` → the
+  connection is dropped. **Fix: repoint that interface string** (one byte in
+  `.rodata`, via `pokew` to the whole word) to the interface your client is
+  actually on (the STA/LAN side). `SIOCGARP` then returns 0.
+- With that, `conn_monitor` **accepts, resolves the MAC, sets the socket
+  non-blocking, applies send/recv timeouts, and promotes the fd** — verified by
+  `strace` on the camera and by the kernel socket showing our bytes queued in
+  `rx_queue`. The accept gate is beaten.
 
-1. Re-trace the serve path from `accept()` to the first handshake reply in the
-   **camera-resident** binary; enumerate every branch that can `close()` the fd.
-2. Prefer satisfying a check over NOPing it when NOPing leaves invalid state.
-3. `strace -f -p <pid> -e trace=network,close` on the camera during a connection
-   pinpoints the exact closing syscall (attach can be finicky on a busy
-   multithreaded daemon — detach any prior tracer first).
+### Step 2 — the receive side (the real blocker)
+
+Even fully accepted, **no thread ever reads the connection**: the bytes sit
+unread in the socket's `rx_queue`. `wifi_recv` is the reader, and its loop is:
+
+```
+if (ap_monitor_running == 0)     // no associated station
+        usleep(...);             // ...so just sleep, forever
+else
+        select(conn_fd); recv(conn_fd); ...   // service the client
+```
+
+So a LAN client is accepted and promoted, then starved: `wifi_recv` never leaves
+its sleep because `ap_monitor_running` is 0 without a real 802.11 association.
+**This, not the accept gate, is why bypassing the accept checks still yielded no
+stream.**
+
+### The correct fix (and a trap to avoid)
+
+Do **not** NOP `wifi_recv`'s sleep branch. On the idle path (no connection,
+`conn_fd == -1`) the fall-through builds an `fd_set` and glibc's `__fdelt_chk(-1)`
+**aborts** — which crashes `instaAIP`, and it takes `instaAlg` + `amba_camctrl`
+down with it (recoverable only by restarting the process / rebooting). We hit
+exactly this.
+
+The clean fix is to **set `ap_monitor_running` to 1** (emulate "a station is
+associated"). That is the exact state the official app creates, so it drives both
+threads down their *designed* paths: `conn_monitor` accepts, and `wifi_recv`
+services the connection (and still `usleep`s safely when `conn_fd == -1`). It also
+makes the two accept-side `ap_monitor_running` NOPs redundant — only the MAC
+`strncmp` NOP and the ARP-interface fix remain strictly necessary. Write the flag
+with `pokew` at its data address (resolve it from the thread-struct base the two
+threads share; it is a single byte).
+
+## Operational lessons
+
+- **A bad live patch crashes the whole camera app stack**, not just `instaAIP`.
+  `instaMonitor` did **not** auto-respawn it for us; recovery was a full reboot
+  (the SD boot-hook brings telnet back; the gateway keep-awake re-wakes and
+  re-joins Wi-Fi). Patch conservatively and keep a reboot path ready.
+- **Detach every prior tracer before attaching a new one** — a process can have
+  only one. A forgotten `strace` left attached makes the next attach fail and
+  silently skews what you think you're measuring (it cost us real time here).
+- **Identify threads by name, not by a guessed TID.** `cat
+  /proc/<pid>/task/*/comm` maps TIDs to the real thread (`conn_monitor`,
+  `wifi_recv`, `rpmsg_read`, …); several internal threads do unrelated pipe I/O
+  that is easy to mistake for your socket.
+- **`/proc/net/tcp` + `/proc/<pid>/fd` are enough to confirm an accept** without a
+  tracer: your connection showing as `ESTABLISHED` with bytes in `rx_queue`, and
+  a matching `socket:[inode]` in the daemon's fd table, proves the daemon accepted
+  it even if nothing reads it yet.
+
+## Remaining step to a live stream
+
+Apply, against the camera-resident binary, the minimal set: **MAC `strncmp` →
+NOP**, **ARP interface → the client's interface**, and **`ap_monitor_running` →
+1**. Then a plain TCP client on the LAN should be serviced on 6666; send the
+app's `START_LIVE_STREAM` control frame and read back the length-prefixed H.264.
+(The frame format and the capture-driven protocol are in [gate-re.md](gate-re.md)
+and the [`tools/`](../tools) decoders.)

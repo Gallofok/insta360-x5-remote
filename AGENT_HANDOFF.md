@@ -51,12 +51,26 @@ The gate (`InsMDev_Wifi_Connect_Monitor`) can be NOP-patched to serve any client
 USB / Wi-Fi untouched), nothing hits flash, revert = restart. (This replaces the
 earlier "needs a UART" conclusion.)
 
-Current status: against the **camera-resident** binary (not the downloaded
-firmware — they differ!), NOPing the three gate branches moved a LAN client from
-`i/o timeout` → `EOF` — i.e. into the serve path. **Remaining:** one more
-peer-dependent (`getpeername`-based) check closes non-station clients; finding a
-clean bypass (or confirming the delivery path is intrinsically station-bound) is
-the next RE task. Tools: `tools/poker.c` (NOP), `tools/pokew.c` (write/restore).
+Current status: the 6666 gate is **fully reverse-engineered** against the
+camera-resident binary (not the downloaded firmware — they differ!). It is **two
+subsystems**, each with its own `ap_monitor_running` check:
+
+- `conn_monitor` — accepts + resolves peer MAC + promotes the fd. Bypassed:
+  NOP the two `ap_monitor_running` guards + the client-MAC `strncmp`, and repoint
+  the `getpeername`/`SIOCGARP` interface string to the client's interface (so the
+  ARP lookup returns 0). Verified: a LAN client is then **accepted, promoted, and
+  socket-configured** (bytes land in the socket `rx_queue`).
+- `wifi_recv` — the thread that actually `recv()`s. It has a **second**
+  `ap_monitor_running` gate and `usleep`s forever unless a station is associated,
+  so the accepted connection is never read. **This is the true blocker.**
+
+Correct fix (don't NOP `wifi_recv`'s sleep branch — the idle fall-through aborts
+in `__fdelt_chk(-1)` and crashes the whole app stack): **set `ap_monitor_running`
+to 1** to emulate an association, which drives both threads down their designed
+paths. Minimal live-patch set = MAC `strncmp` NOP + ARP-interface fix +
+`ap_monitor_running = 1`. Full write-up and the crash/recovery lessons are in
+[docs/live-patch.md](docs/live-patch.md). Tools: `tools/poker.c` (NOP),
+`tools/pokew.c` (write/restore a word, e.g. the flag or the interface string).
 
 ## Gotchas learned the hard way
 
