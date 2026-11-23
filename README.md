@@ -30,11 +30,12 @@ Raspberry Pi) instead of the phone app.
 | **LAN live preview without a hotspot client** | ✅ | Live H.264 pulled by a non-associated LAN client via an in-memory gate patch — see below |
 
 Live preview on port 6666 is normally gated to a **real Wi-Fi client associated
-to the camera's own hotspot**. That gate can be **patched in memory** so a plain
-LAN client (never associated) pulls the live H.264 stream — reverse-engineered
-end to end and verified (decoded to a real frame). See
-[docs/live-patch.md](docs/live-patch.md). The supported, no-patch alternative is
-still a real 5 GHz hotspot client.
+to the camera's own hotspot**. That gate is **patched in memory** so a plain LAN
+client (never associated, no 5 GHz radio) pulls the live H.264 stream — the camera
+instead joins **your** Wi-Fi and is reached over the LAN. Reverse-engineered end
+to end and verified (decoded to a real frame). See
+[docs/live-patch.md](docs/live-patch.md). (The stock, no-patch route would still
+require a real 5 GHz hotspot client.)
 
 ---
 
@@ -74,8 +75,10 @@ Consequences we observed:
 
 - **It auto-leaves a joined Wi-Fi network ~120 s after the BLE session ends** —
   the STA link is tied to the app session, so a keep-awake must hold BLE.
-- **The preview (6666) only serves a genuinely associated hotspot client** — see
-  the gate.
+- **In stock firmware the preview (6666) only serves a genuinely associated
+  hotspot client** — see the gate. That gate is bypassable with an in-memory patch
+  so a non-associated LAN client is served instead (see
+  [docs/live-patch.md](docs/live-patch.md)).
 
 ---
 
@@ -98,12 +101,15 @@ to a fake `192.168.42.x` address all **accept the TCP connection but never
 answer the handshake** — the server is gated on a *real association*, not on the
 peer IP.
 
-Patching these branches to NOP is mechanically trivial and the boot hook can run
-a modified `instaAIP` (reversibly). **But** deploying/validating a modified
-main daemon on this closed box is impractical **without a hardware serial
-console**: `instaAIP` actively re-grabs the USB gadget, reverts `hostapd`, and
-owns the BT stack, and exFAT log writes don't flush — so blind deploys leave the
-camera unrecoverable remotely. A UART is the honest prerequisite for that path.
+These branches are **patched in memory with `ptrace`** against the *running*
+`instaAIP` — no flash writes, no replacement binary, revert = restart the process.
+This supersedes the earlier "you need a UART" conclusion: replacing the daemon on
+disk is indeed impractical on this closed box (it re-grabs the USB gadget, reverts
+`hostapd`, owns the BT stack, and exFAT logs don't flush), but the live-patch path
+avoids all of that. The accept-side checks above are only half of it — the
+`wifi_recv` thread and the SEND path carry their own `ap_monitor_running` checks;
+the full working recipe (and the one data flag that lights up the response/video
+path) is in [**docs/live-patch.md**](docs/live-patch.md).
 
 ---
 
@@ -129,20 +135,32 @@ camera unrecoverable remotely. A UART is the honest prerequisite for that path.
 
 ## Architecture (reference)
 
+**No 5 GHz hotspot association required.** Instead of the gateway joining the
+camera's AP, the camera joins **your** Wi-Fi (STA mode, set over BLE), and the
+gateway reaches it over the ordinary LAN — then patches the 6666 gate in memory
+and pulls the stream:
+
 ```
-                 BLE: wake / keep-awake / Wi-Fi config / control
-   ┌─────────────────────────────────────────────────────────┐
-   │                                                          ▼
-[gateway]  ── Wi-Fi client ──▶  [X5 hotspot]  ── 6666 ──▶  H.264 dual-fisheye
-   │  (needs 5 GHz to                                         │
-   │   associate to the AP)                                   ▼
-   └── wired/uplink ──▶ [VPS: stitch + MediaMTX] ──VPN──▶ phone (remote view)
+      BLE from the gateway: wake / keep-awake / join-your-Wi-Fi / control
+   ┌──────────────────────────────────────────────────────────────────┐
+   │                                                                    ▼
+[gateway]  ◀────────── your home Wi-Fi / LAN ──────────▶  [X5 as a STA on your Wi-Fi]
+ any always-on box          (camera joined via BLE                      │
+ with BLE — NO 5 GHz         SET_WIFI_CONNECTION_INFO)                   │ root shell
+ radio, NO hotspot                    │                                 │ (SD boot hook)
+ association needed                    │  in-memory ptrace patch of      ▼
+   │                                   │  instaAIP's 6666 gate  ──▶  H.264 dual-fisheye
+   │                                   └──────── 6666 over the LAN ──────┘
+   └── uplink ──▶ [VPS: stitch + MediaMTX] ──VPN──▶ phone (remote view)
 ```
 
-The gateway can be any always-on box with BLE + a 5 GHz Wi-Fi client
-(e.g. a Raspberry Pi with a cheap Linux-friendly 5 GHz USB adapter). Because the
-6666 gate requires a *real* associated client, the gateway's Wi-Fi radio must be
-able to join the camera's 5 GHz AP.
+The gateway is any always-on box with Bluetooth (e.g. a Raspberry Pi — a plain
+2.4 GHz-only one is fine). It **does not need a 5 GHz radio and never associates
+to the camera's hotspot**: over BLE it wakes the camera, keeps it awake, and
+makes it join your existing Wi-Fi; then, on the same LAN, it opens the root shell
+(SD boot hook), applies the in-memory gate patch, and pulls `6666` straight over
+the LAN. The old "gateway needs a 5 GHz client to associate to the AP" constraint
+is gone.
 
 ---
 

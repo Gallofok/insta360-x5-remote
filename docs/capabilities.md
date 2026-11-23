@@ -60,9 +60,15 @@ Legend: ✅ verified on real hardware · ⚠️ partial / needs specific hardwar
 | Replace `instaAIP` via SD boot hook | ❌ | Fights the supervised daemon (re-grabs USB/Wi-Fi/BT); exFAT logs don't flush; a bad binary = no remote recovery. Also failed because the **downloaded firmware ≠ the installed version** (wrong offsets) |
 | USB-serial (g_serial) console for debugging | ❌ | `/dev/ttyGS0` comes up, but `instaAIP` re-claims the USB gadget for mass-storage; superseded by in-memory patching anyway |
 
-## The one missing link
+## The full chain (solved)
 
-A **5 GHz Wi-Fi client** for the gateway (e.g. a Linux-friendly USB adapter on
-the Pi). With it, the gateway becomes a *real* associated client → passes the
-gate legitimately → pulls 6666 → forwards to a VPS. Everything else in the chain
-is already done.
+No 5 GHz radio needed. The camera joins **your** Wi-Fi (STA, over BLE); the
+gateway, on the same LAN, applies the in-memory gate patch (incl.
+`ap_monitor_running=1`) and speaks the 6666 protocol (`syNceNdinS` + paced
+commands + `START_LIVE`) → pulls the live H.264 → forwards to a VPS. Verified end
+to end. See [live-patch.md](live-patch.md).
+
+The stock, no-patch alternative (a real 5 GHz hotspot client associated to the
+camera's AP) also works but is not required. The one thing still **open** is
+fully-standalone serving — the camera pulling its own 6666 over loopback and
+forwarding itself (gated in stock firmware; untested under the full patch set).

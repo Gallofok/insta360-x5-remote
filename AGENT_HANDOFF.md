@@ -12,9 +12,11 @@ relays it to a VPS for remote viewing — no phone app in the loop.
 
 ## One-line status
 
-Everything works **except** pulling the 6666 stream, which is gated to a **real
-Wi-Fi client associated to the camera's own (5 GHz) hotspot**. The single
-missing piece is a **5 GHz Wi-Fi client on the gateway**.
+**Solved end to end:** a non-associated LAN client pulls the live 6666 H.264 from
+the camera (no 5 GHz radio, no hotspot association) via an in-memory `ptrace` patch
+of `instaAIP` + replaying the app's handshake/commands **paced**. Verified —
+decoded to a real frame. Full recipe in [docs/live-patch.md](docs/live-patch.md).
+The camera joins **your** Wi-Fi (STA, over BLE) and is reached over the LAN.
 
 ## What's done (see `docs/capabilities.md` for the full matrix)
 
@@ -27,21 +29,27 @@ missing piece is a **5 GHz Wi-Fi client on the gateway**.
 - 6666 preview protocol decoded; a real stream captured/decoded/stitched.
 - The 6666 access gate reverse-engineered end to end (`docs/gate-re.md`).
 
-## Immediate next step (to get live streaming)
+## How live streaming works now (LAN path — no 5 GHz)
 
-1. Put a **Linux-friendly 5 GHz USB Wi-Fi adapter** on the gateway (MT7612U /
-   MT7921AU class, plug-and-play).
-2. Associate it to the camera hotspot (SSID like `X5 <serial>.OSC`, its
-   password is readable from the camera's `/tmp/hostapd.conf` once you have root,
-   or via the app flow). The gateway now gets a `192.168.42.x` lease → it is a
-   *real associated client* → it passes the gate.
-3. From the gateway, pull the stream (reuse `insta360ctl stream --addr
-   192.168.42.1`, or re-implement the `syNceNdinS` + `START_LIVE_STREAM`
-   sequence — see the captured params in the RE notes).
-4. Forward to the VPS (MediaMTX/go2rtc) over the wired uplink; stitch
-   dual-fisheye → equirectangular with ffmpeg `v360=dfisheye` on the VPS.
+1. Over BLE, wake + keep-awake the camera and make it **join your Wi-Fi** (STA).
+   The gateway is on the same LAN — no 5 GHz radio, no hotspot association.
+2. Open the root shell (SD boot hook) and apply the in-memory gate patch set to
+   the running `instaAIP` (see [docs/live-patch.md](docs/live-patch.md)): NOP the
+   `ap_monitor_running` accept guards + MAC check, repoint the `SIOCGARP`
+   interface, reroute + de-sleep `wifi_recv`, and **set `ap_monitor_running=1`**.
+3. From the gateway (a plain LAN client), speak the camera's 6666 protocol:
+   `syNceNdinS` sync, then the setup commands **paced (~80 ms apart)**, then
+   `START_LIVE_STREAM` (op `0x01`). Fastest way to the exact bytes: capture the
+   app once and replay its client→camera stream.
+4. Read back the `type 01` frames (per-frame header + Annex-B H.264), forward to
+   the VPS (MediaMTX/go2rtc); stitch dual-fisheye → equirectangular with ffmpeg
+   `v360=dfisheye`.
 5. Keep-awake is then doubly covered (the held 6666 session itself keeps the
    camera up, same as the app).
+
+**Still open:** fully-standalone serving (camera forwards itself with no external
+puller) — an on-device client over loopback was gated in stock firmware; whether
+the full patch set now permits it is untested.
 
 ## The firmware-patch path (in-memory, via ptrace — this is the good one)
 
