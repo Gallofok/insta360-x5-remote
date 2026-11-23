@@ -144,11 +144,52 @@ threads share; it is a single byte).
   a matching `socket:[inode]` in the daemon's fd table, proves the daemon accepted
   it even if nothing reads it yet.
 
-## Remaining step to a live stream
+## Verified end to end — the gate is beaten (live)
 
-Apply, against the camera-resident binary, the minimal set: **MAC `strncmp` →
-NOP**, **ARP interface → the client's interface**, and **`ap_monitor_running` →
-1**. Then a plain TCP client on the LAN should be serviced on 6666; send the
-app's `START_LIVE_STREAM` control frame and read back the length-prefixed H.264.
-(The frame format and the capture-driven protocol are in [gate-re.md](gate-re.md)
-and the [`tools/`](../tools) decoders.)
+With the full set applied to the running daemon, a plain TCP client on the LAN
+(no 802.11 association) was **serviced on 6666 and received live bidirectional
+protocol frames** from the camera — proof the gate is fully defeated, not just
+understood.
+
+Two equivalent ways to satisfy `wifi_recv` were found; the branch-reroute is the
+one actually run here because it needs no data-segment address:
+
+- **Set `ap_monitor_running = 1`** (one byte, emulates association), or
+- **Reroute `wifi_recv`'s "no-station → sleep" branch to its own
+  connection-fd check** instead of the sleep. Concretely: the entry test is
+  `cbnz ap,<service>` / `b <sleep>`; repoint that `b <sleep>` to the block that
+  does `if (conn_fd >= 0) service(); else usleep()`. That block is the
+  crash-safe one (it `usleep`s when idle, so it never reaches the `fd_set` build
+  with `conn_fd == -1` — which is what aborted in `__fdelt_chk` when we NOP'd the
+  sleep directly). Also NOP the **second** `ap_monitor_running` check on the
+  post-recv path so servicing is continuous rather than gated behind a ~3 s idle
+  sleep.
+
+Minimal live set that worked (offsets build-specific): the two accept-side
+`ap_monitor_running` NOPs, the client-MAC `strncmp` NOP, the ARP-interface byte
+fix, the `wifi_recv` branch reroute, and the post-recv `ap_monitor_running` NOP.
+
+What came back on the serviced socket was the camera's normal message stream —
+length-prefixed frames `[u32 len][3-byte type][payload]`: keepalives (one type,
+3-byte body), and status/notification frames (another type, protobuf bodies
+carrying e.g. the joined-network name). So the serve path runs for us; the camera
+treats the LAN client as a live peer.
+
+## Remaining step: request the actual H.264 substream
+
+Getting the video substream (not just control/keepalive frames) is now a pure
+**protocol** task, independent of the gate:
+
+- The X5's 6666 sync handshake + `START_LIVE_STREAM` must be sent in the camera's
+  own framing (`[len][3-byte type][9-byte subheader incl. the stream subtype]
+  [protobuf]`). The community `insta360ctl stream` is marked *not tested* and its
+  GO3/X3 sync handshake gets no sync-response from the X5 (times out), so its
+  frame format doesn't match this model.
+- Best source of the exact bytes: capture the official app's 6666 session over
+  the hotspot (it *is* a correct client) and replay the sync + start frames, or
+  reverse the message-type dispatch in `instaAIP` that routes to
+  `InsApp_NetFifo_Start_LiveStream`.
+- Servicing also has a latency quirk to iron out: `wifi_recv`'s idle loop sleeps
+  in multi-second steps, and the server handles **one** connection at a time
+  (a stale, un-reaped connection blocks new ones), so a client must connect once,
+  cleanly, and hold.
