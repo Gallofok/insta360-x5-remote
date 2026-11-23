@@ -148,9 +148,17 @@ able to join the camera's 5 GHz AP.
 
 ## Status / limitations
 
-- **Live, fully-standalone (no extra client) streaming is not solved** — it
-  needs either a real 5 GHz hotspot client, or a gate-patched `instaAIP` (which
-  in turn needs a UART to deploy/debug safely).
+- **LAN streaming to a non-associated client: solved.** The gate patch is applied
+  **in memory with `ptrace`** (no flash, no replacement binary, no UART — the
+  earlier "needs a UART" conclusion is superseded), and a plain LAN client pulls
+  the live H.264 — reverse-engineered end to end and verified (decoded to a real
+  frame). See [docs/live-patch.md](docs/live-patch.md).
+- **Still open: fully-standalone serving (camera forwards with *no* external
+  puller).** Today the patched camera still needs something to pull `6666` (a LAN
+  client, e.g. the gateway, which then relays to a VPS). Having the camera pull
+  its own `6666` over loopback and forward itself was gated in stock firmware;
+  whether the full patch set (incl. `ap_monitor_running=1`) now permits an
+  on-device client is untested.
 - Everything here is **version-specific**. Firmware addresses, the gate layout,
   and even protocol details change between builds — re-derive, don't trust
   offsets blindly.
